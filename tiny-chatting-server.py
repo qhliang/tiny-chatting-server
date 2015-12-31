@@ -24,6 +24,7 @@ class Chatting_server:
     self.user_list = {}
     self.loger = Loger('Server is starting...')
     # self.name = ''
+    # self.ip 
     # self.port = 0
     # self.max_users = 0
     # self.server 
@@ -36,16 +37,33 @@ class Chatting_server:
     # 进入循环处理消息状态
     if self.bing_listen() and self.loop():
       pass
+    else:
+      self.loger.log('error while initting server')
+      clean_server()
     
   def loop(self):
     inputs = [self.server]
+    
+    # 新建线程接收来自键盘的消息
+    thread = threading.Thread(target=self.listen_keyboard)
+    thread.setDaemon(True)
+    thread.start()
+    self.loger.log('waitting for child threading connection')
+    
     running = True
+    # 等待接收键盘消息的套接字的连接
+    try:
+      socket_key, t = self.server.accept()
+      inputs.append(socket_key)
+    except socket.error, e:
+      self.loger.log('error while accept key socket')
+      running = False
+    
+    # 循环等待消息
     while running:
-      print 'user_list = ' ,
+      self.loger.log('user_list : ')
       for i in self.user_list.keys():
-        print '%d ' % i.fileno() ,
-        print self.user_list[i]
-      print
+        self.loger.log('%d ' % i.fileno() + str(self.user_list[i]))
       self.loger.log('log before select')
       try:
         rl, wl, el = select.select(inputs, [], [])
@@ -73,7 +91,7 @@ class Chatting_server:
             self.loger.log('add new connection %d failed' % client_no.fileno())
             continue
           inputs.append(client_no)
-          
+        
         # 有新数据到达
         else:
           try:
@@ -84,7 +102,12 @@ class Chatting_server:
             self.loger.log('%d will be closed' % sock.fileno())
             inputs.remove(sock)
             self.remove_user(sock)
-          if len(recv_data):
+          # 来自键盘的消息
+          if sock == inputs[1]:
+            if 'EXIT' == recv_data:
+              running = False
+              continue
+          elif len(recv_data):
             if recv_data.startswith('$$'):
               self.command_handle(sock, recv_data[2:], inputs)
             else:
@@ -98,6 +121,34 @@ class Chatting_server:
     clean_server()
     return True
     
+  # 另外一个线程监听来自键盘的消息并转发到对应的socket中，来唤醒select
+  def listen_keyboard(self):
+    i = 10
+    connect = False
+    socket_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    while i:
+      try:
+        socket_client.connect((self.ip, self.port))
+        connect = True
+        break
+      except socket.error, e:
+        self.loger.log('%dst times: error while key socket connectting server socket' % i)
+      i -= 1
+      time.sleep(1)
+    if connect:
+      while True:
+        try:
+          data = raw_input()
+          socket_client.sendall(data)
+          if 'EXIT' == data:
+            break
+        except EOFError:
+          socket_client.sendall('EXIT')
+          break
+        except socket.error, e:
+          self.loger.log('send keyboard msg failed')
+    socket_client.close()
+  
   # 解析解收到的参数
   def parse_argvs(self):
     description = '''A demon server for chatting online. Enjoying'''
@@ -123,12 +174,26 @@ class Chatting_server:
       self.server.listen(3)
       self.loger.log('Server is running at %s:%d' % (host_ip, self.port))
       self.user_list[self.server] = {'IP':host_ip, 'PORT':self.port, 'NICK':'SERVER'}
+      self.ip = host_ip
       result = True
     except socket.error, e:
       self.loger.log(e)
       self.clean_server()
     return result
-    
+  
+  # 初始化接收键盘消息的套接字对
+  def init_keyboard(self):
+    result = False
+    try:
+      self.stdin_serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      self.stdin_serv.bind((self.ip, 6363))
+      self.stdin_serv.listen(1)
+      self.loger.log('socket for keyboard ready ')
+      result = True
+    except socket.error, e:
+      self.loger.log('error while setting keyboard socket')
+    return result
+  
   # 键盘中断处理函数
   def signal_handle(self, signum, frame):
     self.loger.log('recv exit signal from keyboard')
