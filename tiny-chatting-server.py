@@ -3,67 +3,103 @@
 
 import os
 import sys
+import copy
 import time
 import select
 import socket
 import signal
 import argparse
+import threading
 
-# ÈÕÖ¾ÏîÀà
-class LogerItem:
-  '''item for loger'''
-  def __init__(self, msg):
-    self.time = time.strftime('%H:%M:%S')
-    self.msg = msg
-    
-  def show(self):
-    print "%s\t%s" % (self.time, self.msg)
+from user import User
+from loger import Loger
 
-# ÈÕÖ¾Àà
-class Loger:
-  '''A log class'''
-  def __init__(self, msg=''):
-    self.logList = []
-    self.log('Loger starting')
-    if not len(msg):
-      self.log(msg)
-  
-  def __del__(self):
-    del self.logList
-    
-  def _log(self, msg):
-    item = LogerItem(msg)
-    self.logList.append(item)
-    return item
-  
-  def log(self, msg):
-    item = self._log(msg)
-    item.show()
-    
-  def onlyPrint(self, msg):
-    LogerItem(msg).show()
-    
-  def printAllLogs(self):
-    for item in self.logList:
-      print "%s\t%s" % (item.time, item.msg)
-      
-class User:
-  '''A user who are online'''
-  def __init__(self, addr, port, nick=''):
-    self.addr = addr
-    self.port = port
-    self.nick = nick
-    
   
 # server class
 class Chatting_server:
   '''A server for chat online service'''
+  User_Info_Dict_Template = {'IP':'', 'PORT':0, 'NICK':''}
+  
   def __init__(self):
     self.user_list = {}
     self.loger = Loger('Server is starting...')
+    # self.name = ''
+    # self.port = 0
+    # self.max_users = 0
+    # self.server 
     signal.signal(signal.SIGINT, self.signal_handle)
     
-    # ´¦Àí¸½¼Ó²ÎÊı
+    # å¤„ç†å‚æ•°
+    self.parse_argvs()
+    
+    # ç»‘å®šIPå’Œç«¯å£ï¼Œå¹¶å¼€å¯ç›‘å¬
+    # è¿›å…¥å¾ªç¯å¤„ç†æ¶ˆæ¯çŠ¶æ€
+    if self.bing_listen() and self.loop():
+      pass
+    
+  def loop(self):
+    inputs = [self.server]
+    running = True
+    while running:
+      print 'user_list = ' ,
+      for i in self.user_list.keys():
+        print '%d ' % i.fileno() ,
+        print self.user_list[i]
+      print
+      self.loger.log('log before select')
+      try:
+        rl, wl, el = select.select(inputs, [], [])
+      except select.error, e:
+        self.loger.log('error while selectting : %s' % e)
+      self.loger.log('log after select')
+      
+      self.loger.log( 'rs = %d; ws = %d; es = %d' % (len(rl), len(wl), len(el)))
+      
+      # æœ‰äº‹ä»¶å‘ç”Ÿ, å¯è¯»/å¯å†™/å¼‚å¸¸
+      for sock in rl:
+        
+        # æœ‰æ–°çš„è¿æ¥è¯·æ±‚
+        if sock == self.server:
+          try:
+            client_no, client_info = self.server.accept()
+          except socket.error, e:
+            self.loger.log('error while acceptting new connection : %s' % e)
+            running = False
+            continue
+          client_info_dict = {'IP':client_info[0], 'PORT':client_info[1]}
+          if self.insert_user(client_no, client_info_dict):
+            self.loger.log('add new connection %d OK' % client_no.fileno())
+          else:
+            self.loger.log('add new connection %d failed' % client_no.fileno())
+            continue
+          inputs.append(client_no)
+          
+        # æœ‰æ–°æ•°æ®åˆ°è¾¾
+        else:
+          try:
+            recv_data = sock.recv(2048)
+            self.loger.log('recveive data from %d [%s]' % (sock.fileno(), recv_data.rstrip()))
+          except socket.error, e:
+            self.loger.log('error while receiving data from %d' % sock.fileno())
+            self.loger.log('%d will be closed' % sock.fileno())
+            inputs.remove(sock)
+            self.remove_user(sock)
+          if len(recv_data):
+            if recv_data.startswith('$$'):
+              self.command_handle(sock, recv_data[2:], inputs)
+            else:
+              self.check_broadcast(sock, recv_data)
+          else:
+            self.loger.log('%d has closed the socket' % sock.fileno())
+            inputs.remove(sock)
+            self.remove_user(sock)
+            
+    self.loger.log('the server will exit ')
+    clean_server()
+    return True
+    
+  # è§£æè§£æ”¶åˆ°çš„å‚æ•°
+  def parse_argvs(self):
     description = '''A demon server for chatting online. Enjoying'''
     parser = argparse.ArgumentParser(description = description)
     parser.add_argument('--name', nargs='?', type=str, help = description, default = 'Default')
@@ -72,153 +108,148 @@ class Chatting_server:
     args = parser.parse_args()
     self.name = args.name
     self.port = args.port
-    self.maxUser = args.max
-    del args
-    del parser 
-    
-    host_name = socket.gethostname()
-    host_ip = socket.gethostbyname(host_name)
-    # °ó¶¨Ì×½Ó×Ö½¨Á¢·şÎñÆ÷
+    self.max_users = args.max
+  
+  # ç»‘å®šIPå’Œç«¯å£å¹¶ç›‘å¬
+  def bing_listen(self):
+    result = False
+    # ç»‘å®šå¥—æ¥å­—å»ºç«‹æœåŠ¡å™¨
     try:
+      host_name = socket.gethostname()
+      host_ip = socket.gethostbyname(host_name)
       self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
       self.server.bind((host_ip, self.port))
       self.server.listen(3)
+      self.loger.log('Server is running at %s:%d' % (host_ip, self.port))
+      self.user_list[self.server] = {'IP':host_ip, 'PORT':self.port, 'NICK':'SERVER'}
+      result = True
     except socket.error, e:
       self.loger.log(e)
-    self.loger.log('Server is running at %s:%d' % (host_ip, self.port))
-    self.loop()
+      self.clean_server()
+    return result
     
-  def loop(self):
-    inputs = [self.server]
-    self.outputs = []
-    running = True
-    while running:
-      self.loger.log('log before select')
-      try:
-        readable, writeable, exceptional = select.select(inputs, [], [])
-      except select.error, e:
-        self.loger.log('error while selectting : %s' % e)
-      self.loger.log('log after select')
-      
-      self.loger.log( 'rs = %d; ws = %d; es = %d' % (len(readable), len(writeable), len(exceptional)))
-      # ÓĞÊÂ¼ş·¢Éú, ¿É¶Á/¿ÉĞ´/Òì³£
-      for sock in readable:
-        # ÓĞĞÂµÄÁ¬½ÓÇëÇó
-        if sock == self.server:
-          state, client_no = self.insert_user()
-          if not state:
-            running = False
-            break
-          inputs.append(client_no)
-          self.outputs.append(client_no)
-          
-        # ´Ó¼üÅÌÊÕµ½Êı¾İ
-        elif sock == sys.stdin:
-          key_data = sys.stdin.readline()
-          if 'stop' == key_data.lower():
-            self.loger.log('stop command from keyboard.')
-            running = False
-            
-        # ÓĞĞÂÊı¾İµ½´ï
-        else:
-          recv_data = sock.recv(1024)
-          if len(recv_data)!=0:
-            nick = self.user_list[sock].nick
-            self.loger.log('recv msg from %d[%s]: %s' % (sock.fileno(), nick, recv_data))
-            if recv_data.startswith('$$'):
-              running = self.command_handle(sock, recv_data[2:], inputs, self.outputs)
-            else :
-              self.send(nick, self.user_list.keys(), recv_data)
-          else:
-            inputs.remove(sock)
-            self.outputs.remove(sock)
-            self.loger.log('removed %d from inputs and outputs and closed it ' % sock.fileno())
-            try:
-              sock.close()
-            except socket.error, e:
-              pass
-            
-    self.loger.log('the server will be cleaned.')
-    clean_server()
-    
-  # ¼üÅÌÖĞ¶Ï´¦Àíº¯Êı
+  # é”®ç›˜ä¸­æ–­å¤„ç†å‡½æ•°
   def signal_handle(self, signum, frame):
     self.loger.log('recv exit signal from keyboard')
     self.loger.log('server will be cleaned')
     self.clean_server()
     
               
-  # ÄÚ²¿º¯Êı£¬·¢ËÍÊı¾İµ½Ö¸¶¨ÎÄ¼şºÅ(ÓÃ»§)
+  # å†…éƒ¨å‡½æ•°ï¼Œå‘é€æ•°æ®åˆ°æŒ‡å®šæ–‡ä»¶å·(ç”¨æˆ·)
   def _send(self, dest_no, msg):
+    result = False
     try:
       dest_no.sendall(msg)
+      result = True
     except socket.error, e:
       self.loger.log('error with sending msg: %s' % e)
+    return result
       
-  # ·¢ËÍÊı¾İµ½Ö¸¶¨ÎÄ¼şºÅ(ÓÃ»§)
-  def send(self, from_user_nick, dest_no_list, msg):
-    if not len(from_user_nick):
-      from_user_nick = '-Anonymous-'
-    msg = '[%s\t]' % from_user_nick + msg
-    for dest_no in dest_no_list:
-      self._send(dest_no, msg)
-  
-  # ´ÓÖ¸¶¨ÎÄ¼şºÅ(ÓÃ»§)½ÓÊÕÊı¾İ
-  def receive(self, user_no):
-    state = False
-    recv_data = ''
+  # å‘é€æ•°æ®åˆ°æŒ‡å®šæ–‡ä»¶å·(ç”¨æˆ·)
+  def send(self, user_no, dest_no_list, msg):
+    result = False
+    failed_list = []
     try:
-      while True:
-        str = user_no.recv(1024)
-        if not len(str):
-          break
-        recv_data += str
-      state = True
-    except socket.error, e:
-      self.loger.log('error while receiving data from %d' % user_no.fileno())
-    return state, recv_data
+      dest_no_list.remove(self.server)
+    except:
+      pass
+    if self.check_user(user_no):
+      nick = self.user_list[user_no]['NICK']
+      msg = '[%s\t]\t' % nick + msg
+      for dest_no in dest_no_list:
+        result = self._send(dest_no, msg)
+        if not result:
+          failed_list.append(dest_no)
+      if len(dest_no_list) > 1:
+        result = True
+    return result, failed_list
   
-  # ´¦ÀíÓÃ»§ÏûÏ¢ÖĞµÄÃüÁî
-  def command_handle(self, user_no, command_str, inputs, outputs):
-    state = True
+  # æ£€æŸ¥æ¶ˆæ¯çš„å‘é€è€…æ˜¯å¦æœ‰æƒé™å‘é€å¹¿æ’­æ¶ˆæ¯å¹¶å‘é€æ¶ˆæ¯(å¦‚æœæœ‰æƒé™)
+  def check_broadcast(self, user_no, msg):
+    result = False
+    failed_list = []
+    if self.check_user(user_no):
+      result, failed_list = self.send(user_no, self.user_list.keys(), msg)
+    else:
+      self.send(self.server, [user_no], 'You should log in first' + os.linesep)
+    return result, failed_list
+  
+  # å¤„ç†ç”¨æˆ·æ¶ˆæ¯ä¸­çš„å‘½ä»¤
+  def command_handle(self, user_no, command_str, inputs):
+    result = True
     command_list = command_str.split()
     if len(command_list) == 1:
       if 'EXIT' == command_list[0]:
         inputs.remove(user_no)
-        outputs.remove(user_no)
         self.remove_user(user_no)
       else:
-        self.send('-Server-', [user_no], 'Unknown command')
+        self.send(self.server, [user_no], 'Unknown command')
     elif len(command_list) == 2:
       if 'SERV' == command_list[0]:
         if 'EXIT' == command_list[1]:
-          state = False
+          result = False
         else:
-          self.send('-Server-', [user_no], 'Unknown command')
+          self.send(self.server, [user_no], 'Unknown command')
+      elif 'NAME' == command_list[0]:
+        old_info_dict = self.search_user(user_no)
+        if isinstance(old_info_dict, dict):
+          old_info_dict['NICK'] = command_list[1]
+          if self.modify_user(user_no, old_info_dict):
+            self.send(self.server, [user_no], 'modified profile OK' + os.linesep)
+          else:
+            self.send(self.server, [user_no], 'modified profile failed' + os.linesep)
       else:
-        self.send('-Server-', [user_no], 'Unknown command')
-    return state
+        self.send(self.server, [user_no], 'Unknown command')
+    return result
   
-  # Ìí¼ÓÓÃ»§µ½ÓÃ»§ÁĞ±í
-  def insert_user(self):
-    result = True
-    try:
-      client_no, client_info = self.server.accept()
-      self.user_list[client_no] = User(client_info[0], client_info[1])
-      self.loger.log('new connection from %d %s' % (client_no.fileno(), str(client_info)))
-    except socket.error, e:
-      self.loger.log('error while accepting: %s' % e)
-      result = False
-    return result, client_no
+  # æ·»åŠ ç”¨æˆ·åˆ°ç”¨æˆ·åˆ—è¡¨
+  def insert_user(self, user_no, user_info_dict):
+    result = False
+    if user_no not in self.user_list.keys():
+      new_info_dict = copy.deepcopy(self.User_Info_Dict_Template)
+      for key, value in user_info_dict.items():
+        new_info_dict[key] = value
+      self.user_list[user_no] = new_info_dict
+      result = True
+    return result
     
-  # ´ÓÓÃ»§ÁĞ±íÉ¾³ıÓÃ»§
+  # ä»ç”¨æˆ·åˆ—è¡¨åˆ é™¤ç”¨æˆ·
   def remove_user(self, user_no):
-    self.loger.log('user exited %d %s' % (user_no.fileno(), self.user_list[user_no].nick))
-    del self.user_list[user_no]
-    user_no.close()
+    result = False
+    if user_no in self.user_list.keys():
+      del self.user_list[user_no]
+      user_no.close()
+      result = True
+    return result
     
-  # ÇåÀí·şÎñÆ÷×ÊÔ´
+  # ä¿®æ”¹åˆ—è¡¨ä¸­ç°æœ‰çš„ç”¨æˆ·ä¿¡æ¯
+  def modify_user(self, user_no, new_info_dict):
+    result = False
+    if user_no in self.user_list.keys():
+      for key, value in new_info_dict.items():
+        self.user_list[user_no][key] = value
+      result = True
+    return result
+  
+  # è·å–æŒ‡å®šç”¨æˆ·ä¿¡æ¯
+  def search_user(self, user_no):
+    if user_no in self.user_list.keys():
+      return self.user_list[user_no]
+    else:
+      return False
+    
+  # æŸ¥çœ‹ç”¨æˆ·å½“å‰çŠ¶æ€
+  def check_user(self, user_no):
+    result = False
+    t = self.search_user(user_no)
+    self.loger.log(t)
+    if t != False:
+      if len(t['NICK']):
+        result = True
+    return result
+  
+  # æ¸…ç†æœåŠ¡å™¨èµ„æº
   def clean_server(self):
     del self.name
     del self.loger
