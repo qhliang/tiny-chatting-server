@@ -9,7 +9,7 @@ import socket
 import signal
 import argparse
 
-# æ—¥å¿—é¡¹ç±»
+# ÈÕÖ¾ÏîÀà
 class LogerItem:
   '''item for loger'''
   def __init__(self, msg):
@@ -19,7 +19,7 @@ class LogerItem:
   def show(self):
     print "%s\t%s" % (self.time, self.msg)
 
-# æ—¥å¿—ç±»
+# ÈÕÖ¾Àà
 class Loger:
   '''A log class'''
   def __init__(self, msg=''):
@@ -63,7 +63,7 @@ class Chatting_server:
     self.loger = Loger('Server is starting...')
     signal.signal(signal.SIGINT, self.signal_handle)
     
-    # å¤„ç†é™„åŠ å‚æ•°
+    # ´¦Àí¸½¼Ó²ÎÊı
     description = '''A demon server for chatting online. Enjoying'''
     parser = argparse.ArgumentParser(description = description)
     parser.add_argument('--name', nargs='?', type=str, help = description, default = 'Default')
@@ -78,7 +78,7 @@ class Chatting_server:
     
     host_name = socket.gethostname()
     host_ip = socket.gethostbyname(host_name)
-    # ç»‘å®šå¥—æ¥å­—å»ºç«‹æœåŠ¡å™¨
+    # °ó¶¨Ì×½Ó×Ö½¨Á¢·şÎñÆ÷
     try:
       self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -102,9 +102,9 @@ class Chatting_server:
       self.loger.log('log after select')
       
       self.loger.log( 'rs = %d; ws = %d; es = %d' % (len(readable), len(writeable), len(exceptional)))
-      # æœ‰äº‹ä»¶å‘ç”Ÿ, å¯è¯»/å¯å†™/å¼‚å¸¸
+      # ÓĞÊÂ¼ş·¢Éú, ¿É¶Á/¿ÉĞ´/Òì³£
       for sock in readable:
-        # æœ‰æ–°çš„è¿æ¥è¯·æ±‚
+        # ÓĞĞÂµÄÁ¬½ÓÇëÇó
         if sock == self.server:
           state, client_no = self.insert_user()
           if not state:
@@ -113,14 +113,14 @@ class Chatting_server:
           inputs.append(client_no)
           self.outputs.append(client_no)
           
-        # ä»é”®ç›˜æ”¶åˆ°æ•°æ®
+        # ´Ó¼üÅÌÊÕµ½Êı¾İ
         elif sock == sys.stdin:
           key_data = sys.stdin.readline()
           if 'stop' == key_data.lower():
             self.loger.log('stop command from keyboard.')
             running = False
             
-        # æœ‰æ–°æ•°æ®åˆ°è¾¾
+        # ÓĞĞÂÊı¾İµ½´ï
         else:
           recv_data = sock.recv(1024)
           if len(recv_data)!=0:
@@ -142,21 +142,21 @@ class Chatting_server:
     self.loger.log('the server will be cleaned.')
     clean_server()
     
-  # é”®ç›˜ä¸­æ–­å¤„ç†å‡½æ•°
+  # ¼üÅÌÖĞ¶Ï´¦Àíº¯Êı
   def signal_handle(self, signum, frame):
     self.loger.log('recv exit signal from keyboard')
     self.loger.log('server will be cleaned')
     self.clean_server()
     
               
-  # å†…éƒ¨å‡½æ•°ï¼Œå‘é€æ•°æ®åˆ°æŒ‡å®šæ–‡ä»¶å·(ç”¨æˆ·)
+  # ÄÚ²¿º¯Êı£¬·¢ËÍÊı¾İµ½Ö¸¶¨ÎÄ¼şºÅ(ÓÃ»§)
   def _send(self, dest_no, msg):
     try:
       dest_no.sendall(msg)
     except socket.error, e:
       self.loger.log('error with sending msg: %s' % e)
       
-  # å‘é€æ•°æ®åˆ°æŒ‡å®šæ–‡ä»¶å·(ç”¨æˆ·)
+  # ·¢ËÍÊı¾İµ½Ö¸¶¨ÎÄ¼şºÅ(ÓÃ»§)
   def send(self, from_user_nick, dest_no_list, msg):
     if not len(from_user_nick):
       from_user_nick = '-Anonymous-'
@@ -164,7 +164,7 @@ class Chatting_server:
     for dest_no in dest_no_list:
       self._send(dest_no, msg)
   
-  # ä»æŒ‡å®šæ–‡ä»¶å·(ç”¨æˆ·)æ¥æ”¶æ•°æ®
+  # ´ÓÖ¸¶¨ÎÄ¼şºÅ(ÓÃ»§)½ÓÊÕÊı¾İ
   def receive(self, user_no):
     state = False
     recv_data = ''
@@ -179,7 +179,7 @@ class Chatting_server:
       self.loger.log('error while receiving data from %d' % user_no.fileno())
     return state, recv_data
   
-  # å¤„ç†ç”¨æˆ·æ¶ˆæ¯ä¸­çš„å‘½ä»¤
+  # ´¦ÀíÓÃ»§ÏûÏ¢ÖĞµÄÃüÁî
   def command_handle(self, user_no, command_str, inputs, outputs):
     state = True
     command_list = command_str.split()
@@ -200,7 +200,7 @@ class Chatting_server:
         self.send('-Server-', [user_no], 'Unknown command')
     return state
   
-  # æ·»åŠ ç”¨æˆ·åˆ°ç”¨æˆ·åˆ—è¡¨
+  # Ìí¼ÓÓÃ»§µ½ÓÃ»§ÁĞ±í
   def insert_user(self):
     result = True
     try:
@@ -212,13 +212,13 @@ class Chatting_server:
       result = False
     return result, client_no
     
-  # ä»ç”¨æˆ·åˆ—è¡¨åˆ é™¤ç”¨æˆ·
+  # ´ÓÓÃ»§ÁĞ±íÉ¾³ıÓÃ»§
   def remove_user(self, user_no):
     self.loger.log('user exited %d %s' % (user_no.fileno(), self.user_list[user_no].nick))
     del self.user_list[user_no]
     user_no.close()
     
-  # æ¸…ç†æœåŠ¡å™¨èµ„æº
+  # ÇåÀí·şÎñÆ÷×ÊÔ´
   def clean_server(self):
     del self.name
     del self.loger
