@@ -11,7 +11,6 @@ import signal
 import argparse
 import threading
 
-from user import User
 from loger import Loger
 
   
