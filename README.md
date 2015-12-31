@@ -1,2 +1,2 @@
 # tiny-chatting-server
-A simple chatting server with python
+A simple chatting server with python and select
