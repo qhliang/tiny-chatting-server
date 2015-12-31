@@ -47,7 +47,6 @@ class Chatting_server:
     thread = threading.Thread(target=self.listen_keyboard)
     thread.setDaemon(True)
     thread.start()
-    self.loger.log('waitting for child threading connection')
     
     running = True
     # 等待接收键盘消息的套接字的连接
@@ -60,17 +59,22 @@ class Chatting_server:
     
     # 循环等待消息
     while running:
-      self.loger.log('user_list : ')
+      #self.loger.log('user_list -->> ')
+      #for i in self.user_list.keys():
+      #  self.loger.log('%d ' % i.fileno() + str(self.user_list[i]))
+      #self.loger.log('log before select')
+      t = '[' + str(len(self.user_list)) + '] '
       for i in self.user_list.keys():
-        self.loger.log('%d ' % i.fileno() + str(self.user_list[i]))
-      self.loger.log('log before select')
+        t += str(i.fileno()) + '(' + self.user_list[i]['NICK']+ ') '
+      self.loger.log(t)
+      
       try:
         rl, wl, el = select.select(inputs, [], [])
       except select.error, e:
         self.loger.log('error while selectting : %s' % e)
-      self.loger.log('log after select')
+      #self.loger.log('log after select')
       
-      self.loger.log( 'rs = %d; ws = %d; es = %d' % (len(rl), len(wl), len(el)))
+      #self.loger.log( 'rs = %d; ws = %d; es = %d' % (len(rl), len(wl), len(el)))
       
       # 有事件发生, 可读/可写/异常
       for sock in rl:
@@ -116,6 +120,7 @@ class Chatting_server:
             inputs.remove(sock)
             self.remove_user(sock)
             
+    self.check_broadcast(self.server, 'server will be closed in seconds')
     self.loger.log('the server will exit ')
     clean_server()
     return True
@@ -214,6 +219,8 @@ class Chatting_server:
   def send(self, user_no, dest_no_list, msg):
     result = False
     failed_list = []
+    if not msg.endswith(os.linesep):
+      msg += os.linesep
     try:
       dest_no_list.remove(self.server)
     except:
@@ -245,6 +252,7 @@ class Chatting_server:
     command_list = command_str.split()
     if len(command_list) == 1:
       if 'EXIT' == command_list[0]:
+        self.send(self.server, [user_no], 'Goodbye !')
         inputs.remove(user_no)
         self.remove_user(user_no)
       else:
@@ -261,6 +269,7 @@ class Chatting_server:
           old_info_dict['NICK'] = command_list[1]
           if self.modify_user(user_no, old_info_dict):
             self.send(self.server, [user_no], 'modified profile OK' + os.linesep)
+            self.check_broadcast(self.server, 'Hi, %s, welcome' % command_list[1])
           else:
             self.send(self.server, [user_no], 'modified profile failed' + os.linesep)
       else:
@@ -307,7 +316,6 @@ class Chatting_server:
   def check_user(self, user_no):
     result = False
     t = self.search_user(user_no)
-    self.loger.log(t)
     if t != False:
       if len(t['NICK']):
         result = True
