@@ -22,6 +22,7 @@ class Chatting_server:
   def __init__(self):
     self.user_list = {}
     self.loger = Loger('Server is starting...')
+    self.running = False
     # self.name = ''
     # self.ip 
     # self.port = 0
@@ -48,17 +49,17 @@ class Chatting_server:
     thread.setDaemon(True)
     thread.start()
     
-    running = True
+    self.running = True
     # 等待接收键盘消息的套接字的连接
     try:
       socket_key, t = self.server.accept()
       inputs.append(socket_key)
     except socket.error, e:
       self.loger.log('error while accept key socket')
-      running = False
+      self.running = False
     
     # 循环等待消息
-    while running:
+    while self.running:
       #self.loger.log('user_list -->> ')
       #for i in self.user_list.keys():
       #  self.loger.log('%d ' % i.fileno() + str(self.user_list[i]))
@@ -85,7 +86,7 @@ class Chatting_server:
             client_no, client_info = self.server.accept()
           except socket.error, e:
             self.loger.log('error while acceptting new connection : %s' % e)
-            running = False
+            self.running = False
             continue
           client_info_dict = {'IP':client_info[0], 'PORT':client_info[1]}
           if self.insert_user(client_no, client_info_dict):
@@ -108,7 +109,7 @@ class Chatting_server:
           # 来自键盘的消息
           if sock == inputs[1]:
             if 'EXIT' == recv_data:
-              running = False
+              self.running = False
               continue
           elif len(recv_data):
             if recv_data.startswith('$$'):
@@ -116,13 +117,15 @@ class Chatting_server:
             else:
               self.check_broadcast(sock, recv_data)
           else:
+            if self.server == sock:
+              self.running = False
             self.loger.log('%d has closed the socket' % sock.fileno())
             inputs.remove(sock)
             self.remove_user(sock)
             
     self.check_broadcast(self.server, 'server will be closed in seconds')
     self.loger.log('the server will exit ')
-    clean_server()
+    self.clean_server()
     return True
     
   # 另外一个线程监听来自键盘的消息并转发到对应的socket中，来唤醒select
@@ -202,7 +205,7 @@ class Chatting_server:
   def signal_handle(self, signum, frame):
     self.loger.log('recv exit signal from keyboard')
     self.loger.log('server will be cleaned')
-    self.clean_server()
+    self.server.close()
     
               
   # 内部函数，发送数据到指定文件号(用户)
@@ -251,12 +254,7 @@ class Chatting_server:
     result = True
     command_list = command_str.split()
     if len(command_list) == 1:
-      if 'EXIT' == command_list[0]:
-        self.send(self.server, [user_no], 'Goodbye !')
-        inputs.remove(user_no)
-        self.remove_user(user_no)
-      else:
-        self.send(self.server, [user_no], 'Unknown command')
+      self.send(self.server, [user_no], 'Unknown command')
     elif len(command_list) == 2:
       if 'SERV' == command_list[0]:
         if 'EXIT' == command_list[1]:
@@ -292,7 +290,10 @@ class Chatting_server:
     result = False
     if user_no in self.user_list.keys():
       del self.user_list[user_no]
-      user_no.close()
+      try:
+        user_no.close()
+      except socket.error, e:
+        pass
       result = True
     return result
     
